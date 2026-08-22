@@ -1,0 +1,18 @@
+from __future__ import annotations
+
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+from configs.ModelConfig import ModelConfig
+
+
+class RMSNorm(nn.Module):
+    def __init__(self, cfg: ModelConfig):
+        super().__init__()
+        self.dim = cfg.hidden_size
+        self.eps = cfg.rms_norm_eps
+        self.weight = nn.Parameter(torch.ones(self.dim))
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return F.rms_norm(x, (self.dim,), self.weight, self.eps)
