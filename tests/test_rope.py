@@ -1,12 +1,12 @@
 import pytest
 import torch
 
-from configs.ModelConfig import ModelConfig
-from model.RoPE import RoPE
+from configs.model_config import ModelConfig
+from model.rope import RoPE
 
 
 def _make_cfg(**kwargs):
-    defaults = dict(qk_rope_dim=16, max_seq_len=64, original_max_seq_len=32)
+    defaults = {"qk_rope_dim": 16, "max_seq_len": 64, "original_max_seq_len": 32}
     defaults.update(kwargs)
     return ModelConfig(**defaults)
 
@@ -110,7 +110,6 @@ def test_rope_odd_feature_dim_raises():
 def test_rope_invalid_position_ids_shape_raises():
     cfg = _make_cfg()
     model = RoPE(cfg)
-    x = torch.randn(2, 4, 16)
     pos_ids = torch.arange(8).reshape(2, 4)
     x2 = torch.randn(3, 4, 16)
     with pytest.raises(ValueError, match="position_ids shape must match"):

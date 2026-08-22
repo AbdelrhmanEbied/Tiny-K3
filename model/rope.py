@@ -3,9 +3,9 @@ from __future__ import annotations
 import math
 
 import torch
-import torch.nn as nn
+from torch import nn
 
-from configs.ModelConfig import ModelConfig
+from configs.model_config import ModelConfig
 
 
 class RoPE(nn.Module):
