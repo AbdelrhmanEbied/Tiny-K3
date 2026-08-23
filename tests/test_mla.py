@@ -31,9 +31,16 @@ def test_mla_construction():
 def test_mla_parameter_shapes():
     cfg = _make_cfg()
     model = MLA(cfg)
-    assert model.w_in.weight.shape == (2 * cfg.kv_lora_rank, cfg.hidden_size)
-    assert model.w_uq_qr.weight.shape == (
-        cfg.num_attention_heads * (cfg.qk_nope_dim + cfg.qk_rope_dim),
+    assert model.w_in.weight.shape == (
+        2 * cfg.kv_lora_rank + cfg.qk_rope_dim,
+        cfg.hidden_size,
+    )
+    assert model.w_uq_nope.weight.shape == (
+        cfg.num_attention_heads * cfg.qk_nope_dim,
+        cfg.kv_lora_rank,
+    )
+    assert model.w_qr_rope.weight.shape == (
+        cfg.num_attention_heads * cfg.qk_rope_dim,
         cfg.kv_lora_rank,
     )
     assert model.w_uk.shape == (
@@ -46,7 +53,6 @@ def test_mla_parameter_shapes():
         cfg.kv_lora_rank,
         cfg.qk_nope_dim + cfg.qk_rope_dim,
     )
-    assert model.w_kr.weight.shape == (cfg.qk_rope_dim, cfg.hidden_size)
     assert model.w_o.weight.shape == (
         cfg.hidden_size,
         cfg.num_attention_heads * (cfg.qk_nope_dim + cfg.qk_rope_dim),
@@ -189,13 +195,14 @@ def _reference_mla(model: MLA, x: torch.Tensor):
 
     pos = torch.arange(T).expand(B, -1)
 
-    c_in = model.w_in(x)
-    c_kv, c_q = c_in.split(Dc, dim=-1)
+    proj = model.w_in(x)  # [B,T,2*Dc+Dr]
+    c_kv = proj[..., :Dc]
+    c_q = proj[..., Dc : 2 * Dc]
+    k_rope_raw = proj[..., 2 * Dc :]
 
-    q_proj = model.w_uq_qr(c_q).view(B, T, H, Dn + Dr)
-    q_nope, q_rope = q_proj.split([Dn, Dr], dim=-1)
-    q_rope = model.rope(q_rope, pos)
-    k_rope = model.rope(model.w_kr(x), pos)
+    q_nope = model.w_uq_nope(c_q).view(B, T, H, Dn)
+    q_rope = model.rope(model.w_qr_rope(c_q).view(B, T, H, Dr), pos)
+    k_rope = model.rope(k_rope_raw, pos)
 
     # per-head queries/keys/values
     q = torch.cat(
@@ -279,7 +286,7 @@ def test_mla_attention_weights_upstream_gradient():
     model = MLA(cfg)
     x = torch.randn(1, 4, cfg.hidden_size)
     model(x).square().mean().backward()
-    for name in ("w_in", "w_uq_qr", "w_kr", "w_o"):
+    for name in ("w_in", "w_uq_nope", "w_qr_rope", "w_o"):
         assert getattr(model, name).weight.grad is not None
         assert getattr(model, name).weight.grad.abs().sum() > 0
     assert model.w_uk.grad is not None and model.w_uk.grad.abs().sum() > 0
@@ -388,14 +395,11 @@ def test_mla_absorbed_q_matches_manual_computation():
     model = MLA(cfg)
     model.eval()
 
-    w_uq_qr = (
-        model.w_uq_qr.weight.detach()
+    w_nope = (
+        model.w_uq_nope.weight.detach()
         .clone()
-        .view(
-            cfg.num_attention_heads, cfg.qk_nope_dim + cfg.qk_rope_dim, cfg.kv_lora_rank
-        )
+        .view(cfg.num_attention_heads, cfg.qk_nope_dim, cfg.kv_lora_rank)
     )
-    w_nope = w_uq_qr[:, : cfg.qk_nope_dim, :]
     expected_q = torch.matmul(w_nope.transpose(-1, -2), model.w_uk.detach())
 
     model._absorb_weights()

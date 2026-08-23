@@ -29,12 +29,17 @@ class MLA(nn.Module):
         self.factor = cfg.factor
         self.mscale = 0.1 * cfg.mscale * math.log(self.factor) + 1
 
-        self.w_in = nn.Linear(self.dim, 2 * self.kv_lora_rank, bias=False)
+        # fused input projection: [c_kv | c_q | k_rope] in one GEMM
+        self.w_in = nn.Linear(
+            self.dim, 2 * self.kv_lora_rank + self.qk_rope_dim, bias=False
+        )
 
-        self.w_uq_qr = nn.Linear(
-            self.kv_lora_rank,
-            self.num_heads * self.qk_nope_dim + self.num_heads * self.qk_rope_dim,
-            bias=False,
+        # q projections split so the absorbed path can skip computing the nope half
+        self.w_uq_nope = nn.Linear(
+            self.kv_lora_rank, self.num_heads * self.qk_nope_dim, bias=False
+        )
+        self.w_qr_rope = nn.Linear(
+            self.kv_lora_rank, self.num_heads * self.qk_rope_dim, bias=False
         )
 
         self.w_uk = nn.Parameter(
@@ -69,6 +74,12 @@ class MLA(nn.Module):
             self.register_buffer(
                 "w_out_absorbed",
                 torch.empty(self.dim, self.num_heads, self.kv_lora_rank),
+                persistent=False,
+            )
+            # pre-flattened [H*Dc, D] view for the single-GEMM output projection
+            self.register_buffer(
+                "w_out_absorbed_flat",
+                torch.empty(self.num_heads * self.kv_lora_rank, self.dim),
                 persistent=False,
             )
 
@@ -111,16 +122,12 @@ class MLA(nn.Module):
             )
 
         with torch.inference_mode():
-            w_uq_qr = (
-                self.w_uq_qr.weight.contiguous()
-            )  # [Dc,H(Dn+Dr)]  we want to turn it into [H,Dc,Dc]
-            # hmmm we could do view it into [H,Dn+Dr,Dc] then remove the rope we don't need it HM ig this will work
-            w_uq_qr = w_uq_qr.view(
-                self.num_heads, self.qk_nope_dim + self.qk_rope_dim, self.kv_lora_rank
+            # [H,Dn,Dc]
+            w_nope = self.w_uq_nope.weight.view(
+                self.num_heads, self.qk_nope_dim, self.kv_lora_rank
             )
-            w_nope = w_uq_qr[:, : self.qk_nope_dim, :]
 
-            # [H,Dn,Dc] @ [H,Dn,Dc] -> we need to transpose -> #[H,Dc,Dn]  @ [H,Dn,Dc] -> [H,Dc,Dc] YES IT WORKED
+            # [H,Dc,Dn] @ [H,Dn,Dc] -> [H,Dc,Dc]: fold the q up-projection into W_uk
             w_q_absorbed = torch.matmul(w_nope.transpose(-1, -2), self.w_uk)
 
             w_o = (
@@ -133,6 +140,13 @@ class MLA(nn.Module):
 
             self.w_q_absorbed.copy_(w_q_absorbed)
             self.w_out_absorbed.copy_(w_out_absorbed)
+            # row index = h * kv_lora_rank + k so out = attn_flat @ flat
+            self.w_out_absorbed_flat.copy_(
+                w_out_absorbed.permute(1, 2, 0).reshape(
+                    self.num_heads * self.kv_lora_rank, self.dim
+                )
+            )
+
             assert w_q_absorbed.shape == (
                 self.num_heads,
                 self.kv_lora_rank,
@@ -150,6 +164,13 @@ class MLA(nn.Module):
 
             self._weights_absorbed = True
 
+    def _project_input(self, x: torch.Tensor):
+        proj = self.w_in(x)  # [B,T,2*Dc+Dr]
+        c_kv = proj[..., : self.kv_lora_rank]
+        c_q = proj[..., self.kv_lora_rank : 2 * self.kv_lora_rank]
+        k_rope_raw = proj[..., 2 * self.kv_lora_rank :]
+        return c_kv, c_q, k_rope_raw
+
     def _normal_forward(
         self, x: torch.Tensor, position_ids: torch.Tensor | None = None
     ):
@@ -161,34 +182,28 @@ class MLA(nn.Module):
                 torch.arange(start, end, device=x.device).unsqueeze(0).expand(bsz, -1)
             )
 
-        c_in = self.w_in(x)  # [B,T,2*Dc]
+        c_kv, c_q, k_rope_raw = self._project_input(x)
 
-        c_kv, c_q = c_in.split(self.kv_lora_rank, dim=-1)  # [B,T,Dc] Each
-        # [B,T,Dc] @ [Dc,H(Dn+Dr)] - > [B,T,H(Dn+Dr)] - > reshape - > [B,T,H,Dn+Dr]
-        q_proj = self.w_uq_qr(c_q).reshape(
-            bsz, seq_len, self.num_heads, self.qk_nope_dim + self.qk_rope_dim
+        q_nope = self.w_uq_nope(c_q).view(
+            bsz, seq_len, self.num_heads, self.qk_nope_dim
         )
-        # now we split to q_nope and q_rope
-        q_nope, q_rope = q_proj.split(
-            [self.qk_nope_dim, self.qk_rope_dim], dim=-1
-        )  # [B,T,H,Dn],[B,T,H,Dr]
+        q_rope = self.w_qr_rope(c_q).view(
+            bsz, seq_len, self.num_heads, self.qk_rope_dim
+        )
         q_rope = self.rope(q_rope, position_ids)
+        k_rope = self.rope(k_rope_raw, position_ids)  # [B,T,Dr] shared across heads
 
         q_nope = q_nope.transpose(1, 2)  # [B,H,T,Dn]
         q_rope = q_rope.transpose(1, 2)  # [B,H,T,Dr]
-        # [B,T,D] @ [D,Dr] - > [B,T,Dr] shared across heads
-        k_rope = self.rope(self.w_kr(x), position_ids)  # [B,T,Dr]
 
         if self.training:
             # [B,1,T,Dc] @ [H,Dc,Dn] -> [B,H,T,Dn]
             k_nope = c_kv.unsqueeze(1) @ self.w_uk.transpose(-1, -2)
-            k_rope = k_rope.unsqueeze(1).expand(
-                -1, self.num_heads, -1, -1
-            )  # [B,H,T,Dr]
+            k_rope = k_rope.unsqueeze(1).expand(-1, self.num_heads, -1, -1)
 
             q = torch.cat([q_nope, q_rope], dim=-1)  # [B,H,T,Dn+Dr]
             k = torch.cat([k_nope, k_rope], dim=-1)  # [B,H,T,Dn+Dr]
-            v = c_kv.unsqueeze(1) @ self.w_uv  # [B,1,T,Dc] @ [H,Dc,Dv] -> [B,H,T,Dv]
+            v = c_kv.unsqueeze(1) @ self.w_uv  # [B,H,T,Dv]
 
             out = F.scaled_dot_product_attention(
                 q, k, v, is_causal=True, scale=self.softmax_scale
@@ -204,21 +219,21 @@ class MLA(nn.Module):
 
             # [B,1,S,Dc] @ [H,Dc,Dn] -> [B,H,S,Dn]
             k_nope = past_ckv.unsqueeze(1) @ self.w_uk.transpose(-1, -2)
-            k_rope = past_krope.unsqueeze(1).expand(
-                -1, self.num_heads, -1, -1
-            )  # [B,H,S,Dr]
+            k_rope = past_krope.unsqueeze(1).expand(-1, self.num_heads, -1, -1)
             v = past_ckv.unsqueeze(1) @ self.w_uv  # [B,H,S,Dv]
 
-            q = torch.cat([q_nope, q_rope], dim=-1)  # [B,H,T,Dn+Dr]
-            k = torch.cat([k_nope, k_rope], dim=-1)  # [B,H,S,Dn+Dr]
+            q = torch.cat([q_nope, q_rope], dim=-1)
+            k = torch.cat([k_nope, k_rope], dim=-1)
 
-            # query i (global pos start+i) may attend to keys j <= start+i
-            allow = (
-                torch.arange(end, device=x.device)[None, :]
-                <= (start + torch.arange(seq_len, device=x.device))[:, None]
-            )
             out = F.scaled_dot_product_attention(
-                q, k, v, attn_mask=allow, scale=self.softmax_scale
+                q,
+                k,
+                v,
+                is_causal=start == 0,
+                attn_mask=None
+                if start == 0
+                else self._causal_mask(start, end, seq_len, x.device),
+                scale=self.softmax_scale,
             )
 
         out = out.transpose(1, 2).reshape(
@@ -237,16 +252,14 @@ class MLA(nn.Module):
                 torch.arange(start, end, device=x.device).unsqueeze(0).expand(bsz, -1)
             )
 
-        c_kv, c_q = self.w_in(x).split(self.kv_lora_rank, dim=-1)
+        c_kv, c_q, k_rope_raw = self._project_input(x)
 
-        # only the rope part of w_uq_qr is still needed; the nope part is folded into w_q_absorbed
-        q_proj = self.w_uq_qr(c_q).view(
-            bsz, seq_len, self.num_heads, self.qk_nope_dim + self.qk_rope_dim
-        )
-        q_rope = self.rope(q_proj[..., self.qk_nope_dim :], position_ids).transpose(
-            1, 2
-        )  # [B,H,T,Dr]
-        k_rope = self.rope(self.w_kr(x), position_ids)  # [B,T,Dr]
+        # only the rope projection is needed; the nope half is folded into w_q_absorbed
+        q_rope = self.rope(
+            self.w_qr_rope(c_q).view(bsz, seq_len, self.num_heads, self.qk_rope_dim),
+            position_ids,
+        ).transpose(1, 2)  # [B,H,T,Dr]
+        k_rope = self.rope(k_rope_raw, position_ids)  # [B,T,Dr]
 
         self._ensure_cache(bsz, x.device, x.dtype)
         self.kv_cache[:bsz, start:end] = c_kv
@@ -258,26 +271,37 @@ class MLA(nn.Module):
 
         # [B,T,H,Dc] -> [B,H,T,Dc]: c_q directly through the absorbed projection
         q_lat = torch.einsum("btd,hdc->bhtc", c_q, self.w_q_absorbed.to(c_q.dtype))
-        k_lat = past_ckv.unsqueeze(1).expand(-1, self.num_heads, -1, -1)  # [B,H,S,Dc]
-        k_rope = past_krope.unsqueeze(1).expand(
-            -1, self.num_heads, -1, -1
-        )  # [B,H,S,Dr]
+
+        # keys/values are shared across heads; expand is a zero-copy stride view
+        k_lat = past_ckv.unsqueeze(1).expand(-1, self.num_heads, -1, -1)
+        k_rope = past_krope.unsqueeze(1).expand(-1, self.num_heads, -1, -1)
 
         q = torch.cat([q_lat, q_rope], dim=-1)  # [B,H,T,Dc+Dr]
         k = torch.cat([k_lat, k_rope], dim=-1)  # [B,H,S,Dc+Dr]
-        v = k_lat  # attention runs in latent space; w_uv is folded into w_out_absorbed
 
-        allow = (
-            torch.arange(end, device=x.device)[None, :]
-            <= (start + torch.arange(seq_len, device=x.device))[:, None]
-        )
         out = F.scaled_dot_product_attention(
-            q, k, v, attn_mask=allow, scale=self.softmax_scale
+            q,
+            k,
+            k_lat,  # v in latent space; w_uv folded into w_out_absorbed
+            is_causal=start == 0,
+            attn_mask=None
+            if start == 0
+            else self._causal_mask(start, end, seq_len, x.device),
+            scale=self.softmax_scale,
         )  # [B,H,T,Dc]
 
-        return torch.einsum(
-            "bhtk,dhk->btd", out, self.w_out_absorbed.to(out.dtype)
-        )  # [B,T,D]
+        # single GEMM over all heads: [B,T,H*Dc] @ [H*Dc,D]
+        attn_flat = out.transpose(1, 2).reshape(
+            bsz, seq_len, self.num_heads * self.kv_lora_rank
+        )
+        return attn_flat @ self.w_out_absorbed_flat.to(attn_flat.dtype)  # [B,T,D]
+
+    def _causal_mask(self, start: int, end: int, seq_len: int, device) -> torch.Tensor:
+        """query i (global pos start+i) may attend to keys j <= start+i"""
+        return (
+            torch.arange(end, device=device)[None, :]
+            <= (start + torch.arange(seq_len, device=device))[:, None]
+        )
 
     def forward(self, x: torch.Tensor, position_ids: torch.Tensor | None = None):
         if not self.training and self._weights_absorbed:

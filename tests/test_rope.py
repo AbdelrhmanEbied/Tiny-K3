@@ -206,7 +206,10 @@ def test_rope_freqs_cis_unit_magnitude():
 def test_rope_yarn_with_factor_1_is_identity_on_inv_freq():
     cfg = _make_cfg(rope_type="yarn", factor=1.0)
     model = RoPE(cfg)
-    expected = 1.0 / (cfg.rope_theta ** (torch.arange(0, cfg.qk_rope_dim, 2, dtype=torch.float32) / cfg.qk_rope_dim))
+    expected = 1.0 / (
+        cfg.rope_theta
+        ** (torch.arange(0, cfg.qk_rope_dim, 2, dtype=torch.float32) / cfg.qk_rope_dim)
+    )
     assert torch.allclose(model.inv_freq, expected, atol=1e-7)
 
 
