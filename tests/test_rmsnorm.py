@@ -1,7 +1,7 @@
 import torch
 
-from configs.ModelConfig import ModelConfig
-from model.RMSNorm import RMSNorm
+from configs.model_config import ModelConfig
+from model.rms_norm import RMSNorm
 
 
 def _make_cfg(**kwargs):

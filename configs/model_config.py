@@ -4,7 +4,7 @@ from transformers import PretrainedConfig
 
 
 class ModelConfig(PretrainedConfig):
-    model_type = "your_model"
+    model_type = "tiny_k3"
 
     def __init__(
         self,
@@ -29,6 +29,7 @@ class ModelConfig(PretrainedConfig):
         kv_lora_rank: int = 96,
         qk_nope_dim: int = 48,
         qk_rope_dim: int = 16,
+        absorb_weights: bool = False,
         attn_impl: Literal["sdpa", "flash_attn"] = "sdpa",
         # MoE
         num_experts: int = 8,
@@ -65,6 +66,7 @@ class ModelConfig(PretrainedConfig):
         self.kv_lora_rank = kv_lora_rank
         self.qk_nope_dim = qk_nope_dim
         self.qk_rope_dim = qk_rope_dim
+        self.absorb_weights = absorb_weights
         self.attn_impl = attn_impl
 
         # MoE

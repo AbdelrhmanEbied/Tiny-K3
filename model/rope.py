@@ -3,9 +3,9 @@ from __future__ import annotations
 import math
 
 import torch
-import torch.nn as nn
+from torch import nn
 
-from configs.ModelConfig import ModelConfig
+from configs.model_config import ModelConfig
 
 
 class RoPE(nn.Module):
@@ -25,7 +25,9 @@ class RoPE(nn.Module):
         if self.dim % 2 != 0:
             raise ValueError("qk_rope_dim must be even")
 
-        inv_freq = 1.0 / (self.theta ** (torch.arange(0, self.dim, 2, dtype=torch.float32) / self.dim))
+        inv_freq = 1.0 / (
+            self.theta ** (torch.arange(0, self.dim, 2, dtype=torch.float32) / self.dim)
+        )
 
         if self.rope_type == "yarn":
             inv_freq = self._yarn(inv_freq)
@@ -48,7 +50,9 @@ class RoPE(nn.Module):
 
         wavelength = 2 * math.pi / inv_freq
         r = self.original_max_seq_len / wavelength
-        ramp = ((r - self.beta_slow) / (self.beta_fast - self.beta_slow)).clamp(0.0, 1.0)
+        ramp = ((r - self.beta_slow) / (self.beta_fast - self.beta_slow)).clamp(
+            0.0, 1.0
+        )
         scaled_inv_freq = inv_freq / s
         inv_freq_yarn = (1 - ramp) * scaled_inv_freq + ramp * inv_freq
         return inv_freq_yarn
@@ -77,13 +81,17 @@ class RoPE(nn.Module):
         if position_ids is None:
             position_ids = torch.arange(seq_len, device=device, dtype=torch.long)
         else:
-            position_ids = torch.as_tensor(position_ids, device=device, dtype=torch.long)
+            position_ids = torch.as_tensor(
+                position_ids, device=device, dtype=torch.long
+            )
 
         if position_ids.dim() == 0:
             position_ids = position_ids.view(1)
 
         if position_ids.dim() == 1:
-            freqs = self.freqs_cis.index_select(0, position_ids).unsqueeze(0).unsqueeze(2)
+            freqs = (
+                self.freqs_cis.index_select(0, position_ids).unsqueeze(0).unsqueeze(2)
+            )
         elif position_ids.dim() == 2:
             if position_ids.shape != (bsz, seq_len):
                 raise ValueError("position_ids shape must match [B, T]")
@@ -91,7 +99,9 @@ class RoPE(nn.Module):
         else:
             raise ValueError("position_ids must have shape [T] or [B, T]")
 
-        x_complex = torch.view_as_complex(x.float().reshape(bsz, seq_len, n_heads, dim // 2, 2))
+        x_complex = torch.view_as_complex(
+            x.float().reshape(bsz, seq_len, n_heads, dim // 2, 2)
+        )
 
         y = x_complex * freqs
 
