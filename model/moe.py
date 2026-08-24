@@ -32,13 +32,25 @@ class MoE(nn.Module):
 
         self.router = nn.Linear(self.hidden_size, self.num_experts, bias=False)
 
-        self.w13 = nn.Parameter(torch.empty(self.num_experts, self.moe_latent_dim, 2 * self.intermediate_size))
-        self.w2 = nn.Parameter(torch.empty(self.num_experts, self.intermediate_size, self.moe_latent_dim))
+        self.w13 = nn.Parameter(
+            torch.empty(
+                self.num_experts, self.moe_latent_dim, 2 * self.intermediate_size
+            )
+        )
+        self.w2 = nn.Parameter(
+            torch.empty(self.num_experts, self.intermediate_size, self.moe_latent_dim)
+        )
 
         self.w13_shared = nn.Parameter(
-            torch.empty(self.num_shared_experts, self.hidden_size, 2 * self.intermediate_size)
+            torch.empty(
+                self.num_shared_experts, self.hidden_size, 2 * self.intermediate_size
+            )
         )
-        self.w2_shared = nn.Parameter(torch.empty(self.num_shared_experts, self.intermediate_size, self.hidden_size))
+        self.w2_shared = nn.Parameter(
+            torch.empty(
+                self.num_shared_experts, self.intermediate_size, self.hidden_size
+            )
+        )
 
         self.register_buffer("expert_bias", torch.zeros(self.num_experts))
 
@@ -54,7 +66,11 @@ class MoE(nn.Module):
         nn.init.xavier_uniform_(self.w2_shared)
 
     def situ_glu(self, gate: torch.Tensor, up: torch.Tensor) -> torch.Tensor:
-        return softcap(gate, self.situ_beta_gate) * torch.sigmoid(gate) * softcap(up, self.situ_beta_up)
+        return (
+            softcap(gate, self.situ_beta_gate)
+            * torch.sigmoid(gate)
+            * softcap(up, self.situ_beta_up)
+        )
 
     def route(self, x_flat: torch.Tensor):
         # [N,E]
@@ -64,13 +80,19 @@ class MoE(nn.Module):
         # top-(K+1): K routes + 1 cutoff for QB
         _, idx = torch.topk(router_scores + self.expert_bias, self.topk + 1, dim=-1)
         topk_idx = idx[:, : self.topk]  # [N,K]
-        alpha = router_scores.gather(-1, idx[:, self.topk].unsqueeze(-1)).squeeze(-1).detach()  # [N]
+        alpha = (
+            router_scores.gather(-1, idx[:, self.topk].unsqueeze(-1))
+            .squeeze(-1)
+            .detach()
+        )  # [N]
 
         chosen = router_scores.gather(-1, topk_idx)  # [N,K]
         weights = chosen / chosen.sum(-1, keepdim=True).clamp_min(1e-9)
 
         if self.training:
-            self._qb_margin_chunks.append((router_scores - alpha.unsqueeze(-1)).detach())
+            self._qb_margin_chunks.append(
+                (router_scores - alpha.unsqueeze(-1)).detach()
+            )
 
         return topk_idx, weights
 
@@ -79,7 +101,9 @@ class MoE(nn.Module):
         if not self._qb_margin_chunks:
             return self.expert_bias
         margins = torch.cat(self._qb_margin_chunks)
-        b_hat = -torch.quantile(margins.float(), 1 - self.topk / self.num_experts, dim=0)
+        b_hat = -torch.quantile(
+            margins.float(), 1 - self.topk / self.num_experts, dim=0
+        )
         self.expert_bias.copy_(b_hat - b_hat.mean())
         self._qb_margin_chunks.clear()
         return self.expert_bias
@@ -101,7 +125,9 @@ class MoE(nn.Module):
         z = self.down_proj(x_flat)  # [N,L]
 
         expert_ids = topk_idx.reshape(-1)  # [N*K]
-        token_ids = torch.arange(N, device=x.device).unsqueeze(1).expand(N, K).reshape(-1)  # [N*K]
+        token_ids = (
+            torch.arange(N, device=x.device).unsqueeze(1).expand(N, K).reshape(-1)
+        )  # [N*K]
         gates = weights.reshape(-1).to(z.dtype)  # [N*K]
 
         expert_ids, perm = torch.sort(expert_ids)

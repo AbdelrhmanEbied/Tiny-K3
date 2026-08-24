@@ -1,5 +1,4 @@
 import torch
-import torch.nn.functional as F
 
 from configs.model_config import ModelConfig
 from model.moe import MoE
@@ -7,14 +6,14 @@ from model.rms_norm import RMSNorm
 
 
 def _make_cfg(**kwargs) -> ModelConfig:
-    defaults = dict(
-        hidden_size=16,
-        num_experts=4,
-        num_experts_per_token=2,
-        num_shared_experts=2,
-        moe_intermediate_size=6,
-        moe_latent_dim=8,
-    )
+    defaults = {
+        "hidden_size": 16,
+        "num_experts": 4,
+        "num_experts_per_token": 2,
+        "num_shared_experts": 2,
+        "moe_intermediate_size": 6,
+        "moe_latent_dim": 8,
+    }
     defaults.update(kwargs)
     return ModelConfig(**defaults)
 
@@ -28,15 +27,23 @@ def _make_moe(**kwargs) -> MoE:
 def test_forward_output_shape():
     moe = _make_moe()
     x = torch.randn(2, 5, 16)
-    out, metrics = moe(x)
+    out, _metrics = moe(x)
     assert out.shape == (2, 5, 16)
 
 
 def test_routed_experts_live_in_latent_space():
     cfg = _make_cfg()
     moe = MoE(cfg)
-    assert moe.w13.shape == (cfg.num_experts, cfg.moe_latent_dim, 2 * cfg.moe_intermediate_size)
-    assert moe.w2.shape == (cfg.num_experts, cfg.moe_intermediate_size, cfg.moe_latent_dim)
+    assert moe.w13.shape == (
+        cfg.num_experts,
+        cfg.moe_latent_dim,
+        2 * cfg.moe_intermediate_size,
+    )
+    assert moe.w2.shape == (
+        cfg.num_experts,
+        cfg.moe_intermediate_size,
+        cfg.moe_latent_dim,
+    )
 
 
 def test_shared_experts_live_in_hidden_space():
@@ -62,7 +69,9 @@ def test_moe_latent_differs_from_hidden_still_works():
 
 def test_expert_bias_is_a_non_grad_buffer():
     moe = _make_moe()
-    assert not any("expert_bias" in name for name, p in moe.named_parameters() if p.requires_grad)
+    assert not any(
+        "expert_bias" in name for name, p in moe.named_parameters() if p.requires_grad
+    )
     assert moe.expert_bias.requires_grad is False
     assert moe.expert_bias.shape == (_make_cfg().num_experts,)
 
@@ -143,7 +152,11 @@ def _reference_forward(moe: MoE, x: torch.Tensor) -> torch.Tensor:
     weights = chosen / chosen.sum(-1, keepdim=True).clamp_min(1e-9)
 
     def situ_glu(gate, up):
-        g = moe.situ_beta_gate * torch.tanh(gate / moe.situ_beta_gate) * torch.sigmoid(gate)
+        g = (
+            moe.situ_beta_gate
+            * torch.tanh(gate / moe.situ_beta_gate)
+            * torch.sigmoid(gate)
+        )
         u = moe.situ_beta_up * torch.tanh(up / moe.situ_beta_up)
         return g * u
 

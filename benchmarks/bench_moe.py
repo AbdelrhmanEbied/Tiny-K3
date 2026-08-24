@@ -15,7 +15,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from configs.model_config import ModelConfig
 from model.moe import MoE
 
-REPORT_PATH = Path(__file__).resolve().parents[1] / "Reports" / "moe_benchmark_report.md"
+REPORT_PATH = (
+    Path(__file__).resolve().parents[1] / "Reports" / "moe_benchmark_report.md"
+)
 
 
 def pick_device() -> str:
@@ -116,7 +118,11 @@ def timed(fn, warmup: int, iters: int, label: str, device: str) -> float:
         fn()
         _sync(device)
         elapsed = (perf_counter() - start) / (i + 1) * 1000.0
-        print(f"\r  {label}: iter {i + 1}/{iters} ({elapsed:.1f} ms/iter)", end="", flush=True)
+        print(
+            f"\r  {label}: iter {i + 1}/{iters} ({elapsed:.1f} ms/iter)",
+            end="",
+            flush=True,
+        )
     total_ms = (perf_counter() - start) / iters * 1000.0
     print(f"\r  {label}: done ({total_ms:.2f} ms/iter)")
     return total_ms
@@ -129,7 +135,9 @@ def is_oom(err: RuntimeError) -> bool:
     return "allocate" in msg or "memory" in msg
 
 
-def run_case(name: str, cfg_kwargs: dict, batch: int, seq: int, iters: int, device: str):
+def run_case(
+    name: str, cfg_kwargs: dict, batch: int, seq: int, iters: int, device: str
+):
     torch.manual_seed(0)
     cfg = ModelConfig(**cfg_kwargs)
     moe = MoE(cfg).to(device)
@@ -138,7 +146,9 @@ def run_case(name: str, cfg_kwargs: dict, batch: int, seq: int, iters: int, devi
 
     with torch.inference_mode():
         base = moe(x)[0]
-        assert torch.allclose(base, gather_forward(moe, x), atol=1e-4), f"{name}: gather != module"
+        assert torch.allclose(base, gather_forward(moe, x), atol=1e-4), (
+            f"{name}: gather != module"
+        )
         packed = packed_forward(moe, x)
     assert torch.allclose(base, packed, atol=1e-4), f"{name}: packed != module"
 
@@ -157,9 +167,11 @@ def run_case(name: str, cfg_kwargs: dict, batch: int, seq: int, iters: int, devi
 
     n_tokens = batch * seq
     rows = {}
-    header = (f"=== {name}: B={batch} T={seq} ({n_tokens} tokens) | "
-              f"D={cfg.hidden_size} L={cfg.moe_latent_dim} E={cfg.num_experts} "
-              f"K={cfg.num_experts_per_token} I={cfg.moe_intermediate_size} ===")
+    header = (
+        f"=== {name}: B={batch} T={seq} ({n_tokens} tokens) | "
+        f"D={cfg.hidden_size} L={cfg.moe_latent_dim} E={cfg.num_experts} "
+        f"K={cfg.num_experts_per_token} I={cfg.moe_intermediate_size} ==="
+    )
     print(f"\n{header}", flush=True)
 
     peak_mem_mb = None
@@ -170,7 +182,9 @@ def run_case(name: str, cfg_kwargs: dict, batch: int, seq: int, iters: int, devi
             ms = timed(fn, warmup=3, iters=iters, label=label, device=device)
             rows[label] = (ms, n_tokens / (ms / 1000.0))
             if device == "cuda":
-                peak_mem_mb = max(peak_mem_mb or 0, torch.cuda.max_memory_allocated() / 1024**2)
+                peak_mem_mb = max(
+                    peak_mem_mb or 0, torch.cuda.max_memory_allocated() / 1024**2
+                )
         except RuntimeError as e:
             if is_oom(e):
                 print(f"\r  {label}: OOM" + " " * 40)
@@ -186,7 +200,11 @@ def run_case(name: str, cfg_kwargs: dict, batch: int, seq: int, iters: int, devi
             print(f"{label:<18} {'OOM':>10}")
             continue
         ms, tps = r
-        mem = f"   [peak {peak_mem_mb:.0f} MB]" if (label.endswith("fwd+bwd") and peak_mem_mb) else ""
+        mem = (
+            f"   [peak {peak_mem_mb:.0f} MB]"
+            if (label.endswith("fwd+bwd") and peak_mem_mb)
+            else ""
+        )
         print(f"{label:<18} {ms:>10.2f} {tps:>12,.0f}{mem}")
 
     speedup = None
@@ -227,8 +245,10 @@ def write_report(results: list[dict], device: str):
         lines += [
             f"## {r['name']} — B={r['batch']} T={r['seq']} ({r['n_tokens']} tokens)",
             "",
-            f"D={cfg.hidden_size}, L={cfg.moe_latent_dim}, E={cfg.num_experts}, "
-            f"K={cfg.num_experts_per_token}, I={cfg.moe_intermediate_size}",
+            (
+                f"D={cfg.hidden_size}, L={cfg.moe_latent_dim}, E={cfg.num_experts}, "
+                f"K={cfg.num_experts_per_token}, I={cfg.moe_intermediate_size}"
+            ),
             "",
             "| variant | ms/iter | tokens/s |",
             "|---|---:|---:|",
@@ -242,7 +262,9 @@ def write_report(results: list[dict], device: str):
             lines.append("")
             lines.append(f"**training speedup (packed/gather): {r['speedup']:.2f}x**")
         if r["peak_mem_mb"]:
-            lines.append(f"*peak gpu memory across variants: {r['peak_mem_mb']:.0f} MB*")
+            lines.append(
+                f"*peak gpu memory across variants: {r['peak_mem_mb']:.0f} MB*"
+            )
         lines.append("")
 
     REPORT_PATH.write_text("\n".join(lines))
@@ -254,13 +276,17 @@ def main():
     print(f"threads: {torch.get_num_threads()}", flush=True)
 
     results = [
-        run_case("short", dict(), batch=1, seq=64, iters=20, device=device),
-        run_case("medium", dict(), batch=4, seq=128, iters=10, device=device),
-        run_case("long", dict(), batch=4, seq=256, iters=5, device=device),
+        run_case("short", {}, batch=1, seq=64, iters=20, device=device),
+        run_case("medium", {}, batch=4, seq=128, iters=10, device=device),
+        run_case("long", {}, batch=4, seq=256, iters=5, device=device),
         run_case(
             "wide",
-            dict(num_experts=64, num_experts_per_token=6, moe_latent_dim=512,
-                 moe_intermediate_size=1024),
+            {
+                "num_experts": 64,
+                "num_experts_per_token": 6,
+                "moe_latent_dim": 512,
+                "moe_intermediate_size": 1024,
+            },
             batch=116,
             seq=512,
             iters=10,
