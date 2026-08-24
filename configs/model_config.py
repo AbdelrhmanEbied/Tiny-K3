@@ -33,9 +33,13 @@ class ModelConfig(PretrainedConfig):
         attn_impl: Literal["sdpa", "flash_attn"] = "sdpa",
         # MoE
         num_experts: int = 8,
+        num_shared_experts: int = 1,
         num_experts_per_token: int = 2,
         moe_intermediate_size: int = 1024,
-        capacity_factor: float = 1.25,
+        moe_latent_dim: int = 512,
+        situ_beta_gate: float = 4.0,
+        situ_beta_up: float = 25.0,
+        moe_capacity_factor: float = 1.5,
         **kwargs,
     ):
         super().__init__(
@@ -73,4 +77,8 @@ class ModelConfig(PretrainedConfig):
         self.num_experts = num_experts
         self.num_experts_per_token = num_experts_per_token
         self.moe_intermediate_size = moe_intermediate_size
-        self.capacity_factor = capacity_factor
+        self.moe_latent_dim = moe_latent_dim
+        self.num_shared_experts = num_shared_experts
+        self.situ_beta_gate = situ_beta_gate
+        self.situ_beta_up = situ_beta_up
+        self.moe_capacity_factor = moe_capacity_factor
