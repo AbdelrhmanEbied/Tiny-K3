@@ -135,7 +135,11 @@ class MoE(nn.Module):
         gates = gates[perm]  # [N*K]
 
         counts = torch.bincount(expert_ids, minlength=E)  # [E]
-        capacity = max(1, math.ceil(N * K / E * self.capacity_factor))
+        if self.training:
+            capacity = max(1, math.ceil(N * K / E * self.capacity_factor))
+        else:
+            # no token dropping at inference so outputs don't depend on N
+            capacity = max(1, N * K)
         starts = torch.cat([counts.new_zeros(1), counts.cumsum(0)[:-1]])  # [E]
         slot_ids = torch.arange(N * K, device=x.device) - starts[expert_ids]  # [N*K]
         keep = slot_ids < capacity  # [N*K]

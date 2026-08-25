@@ -1,5 +1,3 @@
-from typing import Literal
-
 from transformers import PretrainedConfig
 
 
@@ -30,7 +28,6 @@ class ModelConfig(PretrainedConfig):
         qk_nope_dim: int = 48,
         qk_rope_dim: int = 16,
         absorb_weights: bool = False,
-        attn_impl: Literal["sdpa", "flash_attn"] = "sdpa",
         # MoE
         num_experts: int = 8,
         num_shared_experts: int = 1,
@@ -40,6 +37,9 @@ class ModelConfig(PretrainedConfig):
         situ_beta_gate: float = 4.0,
         situ_beta_up: float = 25.0,
         moe_capacity_factor: float = 1.5,
+        # Architecture
+        first_k_dense_replace: int = 1,
+        attnres_block_layers: int = 6,
         **kwargs,
     ):
         super().__init__(
@@ -71,7 +71,6 @@ class ModelConfig(PretrainedConfig):
         self.qk_nope_dim = qk_nope_dim
         self.qk_rope_dim = qk_rope_dim
         self.absorb_weights = absorb_weights
-        self.attn_impl = attn_impl
 
         # MoE
         self.num_experts = num_experts
@@ -82,3 +81,5 @@ class ModelConfig(PretrainedConfig):
         self.situ_beta_gate = situ_beta_gate
         self.situ_beta_up = situ_beta_up
         self.moe_capacity_factor = moe_capacity_factor
+        self.first_k_dense_replace = first_k_dense_replace
+        self.attnres_block_layers = attnres_block_layers
