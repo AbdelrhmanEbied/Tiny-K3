@@ -9,6 +9,7 @@ import torch
 from torch import nn
 from torch.utils.checkpoint import checkpoint
 from transformers import AutoConfig, AutoModelForCausalLM, PreTrainedModel
+from transformers.generation import GenerationMixin
 from transformers.modeling_outputs import CausalLMOutput
 
 from configs.model_config import ModelConfig
@@ -92,7 +93,7 @@ class TransformerBlock(nn.Module):
         return blocks, partial_block, router_metrics
 
 
-class TinyK3Model(PreTrainedModel):
+class TinyK3Model(PreTrainedModel, GenerationMixin):
     config_class = ModelConfig
     base_model_prefix = "tiny_k3"
     _tied_weights_keys: ClassVar[dict] = {"lm_head.weight": "embed_tokens.weight"}
@@ -151,7 +152,9 @@ class TinyK3Model(PreTrainedModel):
         self,
         input_ids: torch.Tensor,
         position_ids: torch.Tensor | None = None,
+        attention_mask: torch.Tensor | None = None,
         labels: torch.Tensor | None = None,
+        **kwargs,
     ) -> CausalLMOutput:
         if position_ids is None:
             self._reset_caches()
@@ -186,6 +189,13 @@ class TinyK3Model(PreTrainedModel):
             )
 
         return CausalLMOutput(loss=loss, logits=logits)
+
+    def prepare_inputs_for_generation(
+        self,
+        input_ids: torch.Tensor,
+        **kwargs,
+    ) -> dict:
+        return {"input_ids": input_ids, **kwargs}
 
     def _reset_caches(self) -> None:
         for layer in self.layers:
