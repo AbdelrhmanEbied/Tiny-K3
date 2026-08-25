@@ -49,7 +49,6 @@ class MLA(nn.Module):
             torch.empty(self.num_heads, self.kv_lora_rank, self.head_dim)
         )
 
-        self.w_kr = nn.Linear(self.dim, self.qk_rope_dim, bias=False)
         self.w_o = nn.Linear(self.num_heads * self.head_dim, self.dim, bias=False)
 
         base_scale = (self.head_dim) ** -0.5

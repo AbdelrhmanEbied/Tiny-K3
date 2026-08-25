@@ -25,6 +25,9 @@ class RoPE(nn.Module):
         if self.dim % 2 != 0:
             raise ValueError("qk_rope_dim must be even")
 
+        self._build_buffers()
+
+    def _build_buffers(self):
         inv_freq = 1.0 / (
             self.theta ** (torch.arange(0, self.dim, 2, dtype=torch.float32) / self.dim)
         )
