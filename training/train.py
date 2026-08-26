@@ -47,11 +47,14 @@ def main(cfg: TrainConfig | None = None) -> None:
 
     tokenizer = TokenizerManager(TOKENIZER_NAME, cfg.max_seq_len)
 
-    model_cfg = ModelConfig(
-        max_seq_len=cfg.max_seq_len,
-        original_max_seq_len=cfg.max_seq_len,
-        **load_overrides(os.environ.get("MODEL_OVERRIDES", "model_overrides.json")),
+    model_kwargs = load_overrides(
+        os.environ.get("MODEL_OVERRIDES", "model_overrides.json")
     )
+    # explicit overrides take precedence; otherwise follow the trainer's seq len
+    model_kwargs.setdefault("max_seq_len", cfg.max_seq_len)
+    model_kwargs.setdefault("original_max_seq_len", cfg.max_seq_len)
+
+    model_cfg = ModelConfig(**model_kwargs)
     model = TinyK3Model(model_cfg)
     n_params = sum(p.numel() for p in model.parameters())
     accelerator_hint = f"{cfg.micro_batch_size}x{cfg.grad_accum_steps} micro/accum"
