@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 import os
+import shutil
 import time
 
 import bitsandbytes as bnb
@@ -14,6 +15,8 @@ from tqdm import tqdm
 from configs.trainer_config import TrainConfig
 from model.moe import MoE
 from training.helpers import build_accelerator, copy_checkpoint_from_dataset
+
+_KEEP_CHECKPOINTS = 2
 
 _GENERATION_PROMPTS = (
     "The meaning of life is",
@@ -147,6 +150,15 @@ def _find_latest_checkpoint(checkpoint_dir: str) -> str | None:
     return latest if os.path.exists(os.path.join(latest, "metadata.pt")) else None
 
 
+def _prune_checkpoints(accelerator, ckpt_dir: str, keep: int = 2) -> None:
+    """Keep only the newest `keep` step_* dirs (20GB Kaggle output cap)."""
+    dirs = [d for d in os.listdir(ckpt_dir) if d.startswith("step_")]
+    dirs.sort(key=lambda x: int(x.rsplit("_", 1)[-1]))
+    for old in dirs[:-keep]:
+        accelerator.print(f"Pruning old checkpoint: {old}")
+        shutil.rmtree(os.path.join(ckpt_dir, old), ignore_errors=True)
+
+
 def _save_checkpoint(
     accelerator,
     model,
@@ -199,6 +211,7 @@ def _save_checkpoint(
 
         save_file(clean_state_dict, os.path.join(save_path, "model.safetensors"))
         accelerator.print(f"Checkpoint successfully saved at {save_path}")
+        _prune_checkpoints(accelerator, ckpt_dir, keep=_KEEP_CHECKPOINTS)
 
     accelerator.wait_for_everyone()
 
@@ -394,6 +407,24 @@ def train(
                         + (f" | Val: {val_loss:.4f}" if val_loss is not None else "")
                     )
 
+                    moe_log: dict[str, object] = {}
+                    renames = {"dropped_frac": "overflow_rate"}
+                    for (
+                        metric_name,
+                        metric_tensor,
+                    ) in raw_model.aggregated_router_metrics().items():
+                        key = renames.get(metric_name, metric_name)
+                        moe_log[f"moe/{key}"] = (
+                            accelerator.gather(metric_tensor.float()).mean().item()
+                        )
+
+                    weight_norm = torch.sqrt(
+                        sum(
+                            (p.detach().float() ** 2).sum()
+                            for p in raw_model.parameters()
+                        )
+                    ).item()
+
                     if accelerator.is_main_process:
                         log_data: dict[str, object] = {
                             "train/loss": current_loss,
@@ -402,21 +433,9 @@ def train(
                             "train/tokens_per_sec": tps,
                             "train/step_time": step_time,
                             "train/tokens_seen": tokens_seen,
-                            "train/weight_norm": torch.sqrt(
-                                sum(
-                                    (p.detach().float() ** 2).sum()
-                                    for p in raw_model.parameters()
-                                )
-                            ).item(),
+                            "train/weight_norm": weight_norm,
+                            **moe_log,
                         }
-
-                        router_metrics = raw_model.aggregated_router_metrics()
-                        renames = {"dropped_frac": "overflow_rate"}
-                        for metric_name, metric_tensor in router_metrics.items():
-                            gathered_metric = accelerator.gather(metric_tensor.float())
-                            key = renames.get(metric_name, metric_name)
-                            log_data[f"moe/{key}"] = gathered_metric.mean().item()
-
                         accelerator.log(log_data, step=step)
 
     accelerator.print("Saving final checkpoint...")
