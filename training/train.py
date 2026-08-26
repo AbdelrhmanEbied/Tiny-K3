@@ -1,6 +1,14 @@
-"""Launch TinyK3 pretraining on fineweb-edu with `python -m training.train`."""
+"""Launch TinyK3 pretraining on fineweb-edu with `python -m training.train`.
+
+Optional overrides: put a JSON dict of TrainConfig fields in `overrides.json`
+(or point $TRAIN_OVERRIDES at one) and it is applied on top of the defaults.
+"""
 
 from __future__ import annotations
+
+import json
+import os
+from typing import Any
 
 from configs.model_config import ModelConfig
 from configs.trainer_config import TrainConfig
@@ -23,8 +31,18 @@ FINWEB_EDU = DatasetSpec(
 )
 
 
-def main() -> None:
-    cfg = TrainConfig()
+def load_overrides() -> dict[str, Any]:
+    path = os.environ.get("TRAIN_OVERRIDES", "overrides.json")
+    if not os.path.exists(path):
+        return {}
+    with open(path) as f:
+        overrides = json.load(f)
+    print(f"Loaded {len(overrides)} override(s) from {path}")
+    return overrides
+
+
+def main(cfg: TrainConfig | None = None) -> None:
+    cfg = cfg or TrainConfig(**load_overrides())
 
     tokenizer = TokenizerManager(TOKENIZER_NAME, cfg.max_seq_len)
 
