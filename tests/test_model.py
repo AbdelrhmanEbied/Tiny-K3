@@ -28,6 +28,7 @@ def make_model(layers=4, blk=2, seed_weights=1):
         qk_rope_dim=4,
         num_experts=4,
         num_shared_experts=1,
+        num_experts_per_token=2,
         moe_intermediate_size=32,
         moe_latent_dim=32,
         attnres_block_layers=blk,
@@ -55,14 +56,20 @@ class TestForward:
         ids = torch.randint(0, VOCAB, (2, 8))
         labels = torch.randint(0, VOCAB, (2, 8))
         out = model(ids, labels=labels)
+        shift_logits = out.logits[..., :-1, :].contiguous()
+        shift_labels = labels[..., 1:].contiguous()
         manual = torch.nn.functional.cross_entropy(
-            out.logits.view(-1, VOCAB), labels.view(-1)
+            shift_logits.view(-1, VOCAB), shift_labels.view(-1)
         )
         assert torch.allclose(out.loss, manual, atol=1e-6)
 
-    def test_labels_none_gives_no_loss(self, model):
-        out = model(torch.randint(0, VOCAB, (1, 4)))
-        assert out.loss is None
+    def test_labels_default_to_input_ids(self, model):
+        torch.manual_seed(0)
+        ids = torch.randint(0, VOCAB, (2, 8))
+        out = model(ids)
+        manual = model(ids, labels=ids).loss
+        assert out.loss is not None
+        assert torch.allclose(out.loss, manual, atol=1e-6)
 
     def test_causal_masking_future_tokens_do_not_leak(self, model):
         torch.manual_seed(7)

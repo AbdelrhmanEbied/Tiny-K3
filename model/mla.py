@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import math
+from contextlib import nullcontext
 
 import torch
 import torch.nn.functional as F
 from torch import nn
+from torch.nn.attention import SDPBackend, sdpa_kernel
 
 from configs.model_config import ModelConfig
 from model.rope import RoPE
@@ -24,6 +26,7 @@ class MLA(nn.Module):
         self.kv_lora_rank = cfg.kv_lora_rank
         self.qk_nope_dim = cfg.qk_nope_dim
         self.qk_rope_dim = cfg.qk_rope_dim
+        self.attn_impl = getattr(cfg, "attn_impl", "sdpa")
 
         self.rope = RoPE(cfg)
         self.factor = cfg.factor
@@ -204,9 +207,10 @@ class MLA(nn.Module):
             k = torch.cat([k_nope, k_rope], dim=-1)  # [B,H,T,Dn+Dr]
             v = c_kv.unsqueeze(1) @ self.w_uv  # [B,H,T,Dv]
 
-            out = F.scaled_dot_product_attention(
-                q, k, v, is_causal=True, scale=self.softmax_scale
-            )
+            with self._attn_ctx():
+                out = F.scaled_dot_product_attention(
+                    q, k, v, is_causal=True, scale=self.softmax_scale
+                )
         else:
             self._ensure_cache(bsz, x.device, x.dtype)
             self.kv_cache[:bsz, start:end] = c_kv
@@ -224,16 +228,17 @@ class MLA(nn.Module):
             q = torch.cat([q_nope, q_rope], dim=-1)
             k = torch.cat([k_nope, k_rope], dim=-1)
 
-            out = F.scaled_dot_product_attention(
-                q,
-                k,
-                v,
-                is_causal=start == 0,
-                attn_mask=None
-                if start == 0
-                else self._causal_mask(start, end, seq_len, x.device),
-                scale=self.softmax_scale,
-            )
+            with self._attn_ctx():
+                out = F.scaled_dot_product_attention(
+                    q,
+                    k,
+                    v,
+                    is_causal=start == 0,
+                    attn_mask=None
+                    if start == 0
+                    else self._causal_mask(start, end, seq_len, x.device),
+                    scale=self.softmax_scale,
+                )
 
         out = out.transpose(1, 2).reshape(
             bsz, seq_len, self.num_heads * self.head_dim
@@ -301,6 +306,12 @@ class MLA(nn.Module):
             torch.arange(end, device=device)[None, :]
             <= (start + torch.arange(seq_len, device=device))[:, None]
         )
+
+    def _attn_ctx(self):
+        """Backend selection for the SDPA calls below."""
+        if self.attn_impl == "flash":
+            return sdpa_kernel([SDPBackend.FLASH_ATTENTION])
+        return nullcontext()
 
     def forward(self, x: torch.Tensor, position_ids: torch.Tensor | None = None):
         if not self.training and self._weights_absorbed:

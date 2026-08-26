@@ -1,3 +1,5 @@
+from typing import Literal
+
 from transformers import PretrainedConfig
 
 
@@ -7,11 +9,11 @@ class ModelConfig(PretrainedConfig):
     def __init__(
         self,
         vocab_size: int = 32000,
-        hidden_size: int = 512,
-        num_layers: int = 14,
+        hidden_size: int = 1536,
+        num_layers: int = 20,
         initializer_range: float = 0.02,
         tie_word_embeddings: bool = True,
-        max_seq_len: int = 512,
+        max_seq_len: int = 2048,
         # RMSNorm
         rms_norm_eps: float = 1e-6,
         # RoPE & YaRN
@@ -20,26 +22,27 @@ class ModelConfig(PretrainedConfig):
         beta_slow: float = 1.0,
         beta_fast: float = 32.0,
         factor: float = 1.0,
-        original_max_seq_len: int = 512,
+        original_max_seq_len: int = 2048,
         mscale: float = 1.0,
         # MLA
-        num_attention_heads: int = 8,
-        kv_lora_rank: int = 96,
-        qk_nope_dim: int = 48,
-        qk_rope_dim: int = 16,
+        attn_impl: Literal["sdpa", "flash"] = "sdpa",
+        num_attention_heads: int = 16,
+        kv_lora_rank: int = 256,
+        qk_nope_dim: int = 64,
+        qk_rope_dim: int = 32,
         absorb_weights: bool = False,
         # MoE
-        num_experts: int = 8,
+        num_experts: int = 32,
         num_shared_experts: int = 1,
         num_experts_per_token: int = 2,
         moe_intermediate_size: int = 1024,
-        moe_latent_dim: int = 512,
+        moe_latent_dim: int = 384,
         situ_beta_gate: float = 4.0,
         situ_beta_up: float = 25.0,
-        moe_capacity_factor: float = 1.5,
+        moe_capacity_factor: float = 1.25,
         # Architecture
         first_k_dense_replace: int = 1,
-        attnres_block_layers: int = 6,
+        attnres_block_layers: int = 4,
         **kwargs,
     ):
         super().__init__(
@@ -66,6 +69,7 @@ class ModelConfig(PretrainedConfig):
         self.mscale = mscale
 
         # MLA
+        self.attn_impl = attn_impl
         self.num_attention_heads = num_attention_heads
         self.kv_lora_rank = kv_lora_rank
         self.qk_nope_dim = qk_nope_dim
