@@ -31,8 +31,7 @@ FINWEB_EDU = DatasetSpec(
 )
 
 
-def load_overrides() -> dict[str, Any]:
-    path = os.environ.get("TRAIN_OVERRIDES", "overrides.json")
+def load_overrides(path: str) -> dict[str, Any]:
     if not os.path.exists(path):
         return {}
     with open(path) as f:
@@ -42,13 +41,16 @@ def load_overrides() -> dict[str, Any]:
 
 
 def main(cfg: TrainConfig | None = None) -> None:
-    cfg = cfg or TrainConfig(**load_overrides())
+    cfg = cfg or TrainConfig(
+        **load_overrides(os.environ.get("TRAIN_OVERRIDES", "overrides.json"))
+    )
 
     tokenizer = TokenizerManager(TOKENIZER_NAME, cfg.max_seq_len)
 
     model_cfg = ModelConfig(
         max_seq_len=cfg.max_seq_len,
         original_max_seq_len=cfg.max_seq_len,
+        **load_overrides(os.environ.get("MODEL_OVERRIDES", "model_overrides.json")),
     )
     model = TinyK3Model(model_cfg)
     n_params = sum(p.numel() for p in model.parameters())
