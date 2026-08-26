@@ -159,7 +159,7 @@ class PackedTextDataset(IterableDataset):
 
         iterator = iter(self.stream)
         if num_shards > 1:
-            iterator = iter(self.stream.shard(num_shards=num_shards, index=index))
+            iterator = islice(iterator, index, None, num_shards)
 
         token_buffer: list[int] = []
         yielded = 0

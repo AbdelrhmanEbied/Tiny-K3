@@ -17,6 +17,7 @@ class TokenizerManager:
     def __init__(self, name_or_path: str, max_seq_len: int):
         self.tok: PreTrainedTokenizerBase = AutoTokenizer.from_pretrained(name_or_path)
         self.max_seq_len = max_seq_len
+        self.tok.model_max_length = int(1e12)
 
     @classmethod
     def from_tokenizer(
