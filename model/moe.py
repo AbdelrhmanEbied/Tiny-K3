@@ -147,7 +147,8 @@ class MoE(nn.Module):
         kept_slot_ids = slot_ids[keep]  # [M]
         kept_token_ids = token_ids[keep]  # [M]
         kept_gates = gates[keep]  # [M]
-        dropped_frac = (~keep).sum().item() / max(N * K, 1)
+        dropped = int((~keep).sum())
+        dropped_frac = dropped / max(N * K, 1)
 
         packed = z.new_zeros(E, capacity, self.moe_latent_dim)  # [E,C,L]
         packed[expert_ids[keep], kept_slot_ids] = z[kept_token_ids]
@@ -175,6 +176,7 @@ class MoE(nn.Module):
             "utilization": (torch.exp(entropy) / E).detach().reshape(1),
             "entropy": entropy.detach(),
             "dropped_frac": torch.tensor(dropped_frac),
+            "dropped_tokens": torch.tensor(float(dropped)),
         }
 
         return output, router_metrics

@@ -183,10 +183,15 @@ class TinyK3Model(PreTrainedModel, GenerationMixin):
         logits = self.lm_head(hidden).float()
 
         loss = None
-        if labels is not None:
-            loss = nn.functional.cross_entropy(
-                logits.view(-1, logits.size(-1)), labels.view(-1), ignore_index=-100
-            )
+        if labels is None:
+            labels = input_ids
+        shift_logits = logits[..., :-1, :].contiguous()
+        shift_labels = labels[..., 1:].contiguous()
+        loss = nn.functional.cross_entropy(
+            shift_logits.view(-1, shift_logits.size(-1)),
+            shift_labels.view(-1),
+            ignore_index=-100,
+        )
 
         return CausalLMOutput(loss=loss, logits=logits)
 
