@@ -18,6 +18,12 @@ from training.helpers import build_accelerator, copy_checkpoint_from_dataset
 
 _KEEP_CHECKPOINTS = 2
 
+
+def _wait_everyone(accelerator) -> None:
+    # no-op for single-process runs where no process group exists
+    if accelerator.num_processes > 1:
+        _wait_everyone(accelerator)
+
 _GENERATION_PROMPTS = (
     "The meaning of life is",
     "Once upon a time in a distant kingdom",
@@ -171,7 +177,7 @@ def _save_checkpoint(
     tokens_seen: int,
 ) -> None:
     accelerator.print(f"Saving checkpoint at step {step}...")
-    accelerator.wait_for_everyone()
+    _wait_everyone(accelerator)
 
     save_path = os.path.join(ckpt_dir, f"step_{step}")
     if accelerator.is_main_process:
@@ -213,7 +219,7 @@ def _save_checkpoint(
         accelerator.print(f"Checkpoint successfully saved at {save_path}")
         _prune_checkpoints(accelerator, ckpt_dir, keep=_KEEP_CHECKPOINTS)
 
-    accelerator.wait_for_everyone()
+    _wait_everyone(accelerator)
 
 
 def train(
@@ -229,7 +235,7 @@ def train(
     raw_model = model
 
     accelerator.init_trackers(project_name=cfg.project_name, config=vars(cfg))
-    accelerator.wait_for_everyone()
+    _wait_everyone(accelerator)
 
     if cfg.enable_gradient_checkpointing:
         if hasattr(model, "gradient_checkpointing_enable"):
@@ -244,7 +250,7 @@ def train(
 
     if cfg.checkpoint_path:
         copy_checkpoint_from_dataset(cfg)
-    accelerator.wait_for_everyone()
+    _wait_everyone(accelerator)
 
     ckpt_dir = cfg.out_dir
     os.makedirs(ckpt_dir, exist_ok=True)
@@ -348,9 +354,9 @@ def train(
 
                 if step % cfg.eval_interval == 0:
                     accelerator.print("Evaluating Now...")
-                    accelerator.wait_for_everyone()
+                    _wait_everyone(accelerator)
                     val_loss, val_ppl = evaluate(model, val_dataloader, accelerator)
-                    accelerator.wait_for_everyone()
+                    _wait_everyone(accelerator)
                     if accelerator.is_main_process and val_loss is not None:
                         accelerator.log(
                             {"val_loss": val_loss, "val_ppl": val_ppl}, step=step
@@ -452,6 +458,6 @@ def train(
     )
 
     progress_bar.close()
-    accelerator.wait_for_everyone()
+    _wait_everyone(accelerator)
     accelerator.end_training()
     accelerator.print("Training complete.")
