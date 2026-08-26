@@ -1,3 +1,5 @@
+from typing import Literal
+
 from transformers import PretrainedConfig
 
 
@@ -11,7 +13,7 @@ class ModelConfig(PretrainedConfig):
         num_layers: int = 20,
         initializer_range: float = 0.02,
         tie_word_embeddings: bool = True,
-        max_seq_len: int = 1024,
+        max_seq_len: int = 2048,
         # RMSNorm
         rms_norm_eps: float = 1e-6,
         # RoPE & YaRN
@@ -20,9 +22,10 @@ class ModelConfig(PretrainedConfig):
         beta_slow: float = 1.0,
         beta_fast: float = 32.0,
         factor: float = 1.0,
-        original_max_seq_len: int = 1024,
+        original_max_seq_len: int = 2048,
         mscale: float = 1.0,
         # MLA
+        attn_impl: Literal["sdpa", "flash"] = "sdpa",
         num_attention_heads: int = 16,
         kv_lora_rank: int = 256,
         qk_nope_dim: int = 64,
@@ -66,6 +69,7 @@ class ModelConfig(PretrainedConfig):
         self.mscale = mscale
 
         # MLA
+        self.attn_impl = attn_impl
         self.num_attention_heads = num_attention_heads
         self.kv_lora_rank = kv_lora_rank
         self.qk_nope_dim = qk_nope_dim
