@@ -31,3 +31,6 @@ htmlcov/
 *.safetensors
 
 archive
+
+test_data/
+runs/
