@@ -71,7 +71,7 @@ def main(cfg: TrainConfig | None = None) -> None:
         build_dataloader(train_ds, cfg),
         build_dataloader(eval_ds, cfg),
         cfg,
-        qb_update_interval=100,
+        qb_update_interval=cfg.qb_update_interval,
         tokenizer=tokenizer.tok,
     )
 

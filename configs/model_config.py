@@ -8,7 +8,7 @@ class ModelConfig(PretrainedConfig):
         self,
         vocab_size: int = 32000,
         hidden_size: int = 1536,
-        num_layers: int = 24,
+        num_layers: int = 20,
         initializer_range: float = 0.02,
         tie_word_embeddings: bool = True,
         max_seq_len: int = 1024,
@@ -31,7 +31,7 @@ class ModelConfig(PretrainedConfig):
         # MoE
         num_experts: int = 32,
         num_shared_experts: int = 1,
-        num_experts_per_token: int = 4,
+        num_experts_per_token: int = 2,
         moe_intermediate_size: int = 1024,
         moe_latent_dim: int = 384,
         situ_beta_gate: float = 4.0,

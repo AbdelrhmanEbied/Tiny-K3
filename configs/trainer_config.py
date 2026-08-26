@@ -65,3 +65,6 @@ class TrainConfig:
 
     # Generation sampling (0 disables)
     gen_interval: int = 250
+
+    # Quantile-Balancing router bias refresh (steps); 1 = every step, as DS-V3
+    qb_update_interval: int = 1
