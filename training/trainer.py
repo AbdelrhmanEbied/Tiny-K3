@@ -20,9 +20,9 @@ _KEEP_CHECKPOINTS = 2
 
 
 def _wait_everyone(accelerator) -> None:
-    # no-op for single-process runs where no process group exists
-    if accelerator.num_processes > 1:
-        _wait_everyone(accelerator)
+    import torch.distributed as dist
+    if dist.is_initialized():
+        accelerator.wait_for_everyone()
 
 _GENERATION_PROMPTS = (
     "The meaning of life is",
